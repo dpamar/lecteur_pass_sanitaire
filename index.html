@@ -1,0 +1,648 @@
+<html>
+<head>
+<script src="html5-qrcode.min.js"></script>
+<script src="zlib.min.js"></script>
+<script src="cbor.js"></script>
+<script>
+const cborDecode = (uint8array) => CBOR.decode(new Uint8Array([...uint8array]).buffer)
+
+const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:'
+const divmod = (x, y) => [Math.floor(x / y), x % y]
+
+// Encode a buffer (or uint8array) to base45-encoded string
+const encode = (buffer) => {
+  if (typeof (buffer) === 'string') buffer = Buffer.from(buffer)
+  let res = ''
+  for (let i = 0; i < buffer.length; i = i + 2) {
+    if (buffer.length - i > 1) {
+      const x = (buffer[i] << 8) + buffer[i + 1]
+      const [e, rest] = divmod(x, 45 * 45)
+      const [d, c] = divmod(rest, 45)
+      res += charset[c] + charset[d] + charset[e]
+    } else {
+      const [d, c] = divmod(buffer[i], 45)
+      res += charset[c] + charset[d]
+    }
+  }
+  return res
+}
+
+// Decode base45-encoded input
+const decode = (input) => {
+  const buffer = Array.from(input).map(c => charset.indexOf(c))
+  const res = []
+  for (let i = 0; i < buffer.length; i = i + 3) {
+    if (buffer.length - i >= 3) {
+      const x = buffer[i] + buffer[i + 1] * 45 + buffer[i + 2] * 45 * 45
+      res.push(...divmod(x, 256))
+    } else {
+      const x = buffer[i] + buffer[i + 1] * 45
+      res.push(x)
+    }
+  }
+  return res;
+}
+
+var setVals = [];
+var setVal = (id, value) => {
+  setVals.push(id);
+  document.getElementById(id).innerText = value;
+}
+var clearVals = () => {
+  setVals.map(x=>setVal(x,""));
+  setVals = [];
+}
+
+</script>
+</head>
+<body>
+<div id="reader" style="width:640px"></div>
+<br/>
+
+<h2>Raw</h2>
+Raw : <span id="rawCode"></span><br/>
+<br/>
+<table style="width: 100%"><tr><td style="vertical-align: top;"><div style="height: 100%; vertical-align: top;">
+<h2>Header</h2>
+Encryption algorithm : <span id="encAlg"></span><br/>
+Hashcode : <span id="hash"></span><br/>
+
+<h2>Payload</h2>
+Issuer : <span id="issuer"></span><br/>
+Valid since : <span id="startDate"></span><br/>
+Valid until : <span id="endDate"></span><br/>
+Version : <span id="ver"></span><br/>
+
+<h2>Personal details</h2>
+Surname : <span id="surname"></span><br/>
+Standardised surname : <span id="stSurname"></span><br/>
+Forename : <span id="forename"></span><br/>
+Standardised forename : <span id="stForename"></span><br/>
+Date of birth : <span id="dob"></span><br/>
+
+</div></td><td style="vertical-align: top;"> <div style="height: 100%; vertical-align: top;">
+
+<h2>Vaccine details</h2>
+Certificate ID : <span id="vId"></span><br/>
+Country : <span id="vCtry"></span><br/>
+Issuer : <span id="vIss"></span><br/>
+Dose : <span id="vDose"></span><br/>
+Date : <span id="vDate"></span><br/>
+Disease (see disease-agent-targeted.json) : <span id="vDisease"></span><br/>
+Type (see vaccine-prophylaxis.json) : <span id="vType"></span><br/>
+Product (see vaccine-medicinal-product.json) : <span id="vProd"></span><br/>
+Manufacturer (see vaccine-mah-manf.json) : <span id="vMan"></span><br/>
+
+</div></td><td style="vertical-align: top;"> <div style="height: 100%; vertical-align: top;">
+<h2>Test details</h2>
+Certificate ID : <span id="tId"></span><br/>
+Country : <span id="tCtry"></span><br/>
+Issuer : <span id="tIss"></span><br/>
+Date : <span id="tDate"></span><br/>
+Disease (see disease-agent-targeted.json) : <span id="tDisease"></span><br/>
+Test type (see test-type.json) : <span id="tType"></span><br/>
+Test name : <span id="tName"></span><br/>
+Device identifier (see test-manf.json) : <span id="tDev"></span><br/>
+Test result (see test-result.json) : <span id="tRes"></span><br/>
+Center : <span id="tCenter"></span><br/>
+
+</div></td></tr></table>
+<script>
+
+var diseases = {
+  "valueSetId": "disease-agent-targeted",
+  "valueSetDate": "2021-04-27",
+  "valueSetValues": {
+    "840539006": {
+      "display": "COVID-19",
+      "lang": "en",
+      "active": true,
+      "version": "http://snomed.info/sct/900000000000207008/version/20210131",
+      "system": "http://snomed.info/sct"
+    }
+  }
+};
+
+var types = {
+  "valueSetId": "sct-vaccines-covid-19",
+  "valueSetDate": "2021-04-27",
+  "valueSetValues": {
+    "1119349007": {
+      "display": "SARS-CoV-2 mRNA vaccine",
+      "lang": "en",
+      "active": true,
+      "version": "http://snomed.info/sct/900000000000207008/version/20210131",
+      "system": "http://snomed.info/sct"
+    },
+    "1119305005": {
+      "display": "SARS-CoV-2 antigen vaccine",
+      "lang": "en",
+      "active": true,
+      "version": "http://snomed.info/sct/900000000000207008/version/20210131",
+      "system": "http://snomed.info/sct"
+    },
+    "J07BX03": {
+      "display": "covid-19 vaccines",
+      "lang": "en",
+      "active": true,
+      "version": "2021-01",
+      "system": "http://www.whocc.no/atc"
+    }
+  }
+};
+
+var products = {
+  "valueSetId": "vaccines-covid-19-names",
+  "valueSetDate": "2021-04-27",
+  "valueSetValues": {
+    "EU/1/20/1528": {
+      "display": "Comirnaty",
+      "lang": "en",
+      "active": true,
+      "system": "https://ec.europa.eu/health/documents/community-register/html/",
+      "version": ""
+    },
+    "EU/1/20/1507": {
+      "display": "COVID-19 Vaccine Moderna",
+      "lang": "en",
+      "active": true,
+      "system": "https://ec.europa.eu/health/documents/community-register/html/",
+      "version": ""
+    },
+    "EU/1/21/1529": {
+      "display": "Vaxzevria",
+      "lang": "en",
+      "active": true,
+      "system": "https://ec.europa.eu/health/documents/community-register/html/",
+      "version": ""
+    },
+    "EU/1/20/1525": {
+      "display": "COVID-19 Vaccine Janssen",
+      "lang": "en",
+      "active": true,
+      "system": "https://ec.europa.eu/health/documents/community-register/html/",
+      "version": ""
+    },
+    "CVnCoV": {
+      "display": "CVnCoV",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "Sputnik-V": {
+      "display": "Sputnik-V",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "Convidecia": {
+      "display": "Convidecia",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "EpiVacCorona": {
+      "display": "EpiVacCorona",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "BBIBP-CorV": {
+      "display": "BBIBP-CorV",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "Inactivated-SARS-CoV-2-Vero-Cell": {
+      "display": "Inactivated SARS-CoV-2 (Vero Cell)",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "CoronaVac": {
+      "display": "CoronaVac",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    },
+    "Covaxin": {
+      "display": "Covaxin (also known as BBV152 A, B, C)",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccineproductname",
+      "version": "1.0"
+    }
+  }
+};
+
+var manufacturers = {
+  "valueSetId": "vaccines-covid-19-auth-holders",
+  "valueSetDate": "2021-04-27",
+  "valueSetValues": {
+    "ORG-100001699": {
+      "display": "AstraZeneca AB",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100030215": {
+      "display": "Biontech Manufacturing GmbH",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100001417": {
+      "display": "Janssen-Cilag International",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100031184": {
+      "display": "Moderna Biotech Spain S.L.",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100006270": {
+      "display": "Curevac AG",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100013793": {
+      "display": "CanSino Biologics",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100020693": {
+      "display": "China Sinopharm International Corp. - Beijing location",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100010771": {
+      "display": "Sinopharm Weiqida Europe Pharmaceutical s.r.o. - Prague location",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100024420": {
+      "display": "Sinopharm Zhijun (Shenzhen) Pharmaceutical Co. Ltd. - Shenzhen location",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "ORG-100032020": {
+      "display": "Novavax CZ AS",
+      "lang": "en",
+      "active": true,
+      "system": "https://spor.ema.europa.eu/v1/organisations",
+      "version": ""
+    },
+    "Gamaleya-Research-Institute": {
+      "display": "Gamaleya Research Institute",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccinemanufacturer",
+      "version": "1.0"
+    },
+    "Vector-Institute": {
+      "display": "Vector Institute",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccinemanufacturer",
+      "version": "1.0"
+    },
+    "Sinovac-Biotech": {
+      "display": "Sinovac Biotech",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccinemanufacturer",
+      "version": "1.0"
+    },
+    "Bharat-Biotech": {
+      "display": "Bharat Biotech",
+      "lang": "en",
+      "active": true,
+      "system": "http://ec.europa.eu/temp/vaccinemanufacturer",
+      "version": "1.0"
+    }
+  }
+};
+
+var tests = {
+    "valueSetId": "covid-19-lab-test-type",
+    "valueSetDate": "2021-04-27",
+    "valueSetValues": {
+      "LP6464-4": {
+        "display": "Nucleic acid amplification with probe detection",
+        "lang": "en",
+        "active": true,
+        "version": "2.69",
+        "system": "http://loinc.org"
+      },
+      "LP217198-3": {
+        "display": "Rapid immunoassay",
+        "lang": "en",
+        "active": true,
+        "version": "2.69",
+        "system": "http://loinc.org"
+      }
+    }
+  };
+
+var results = {
+  "valueSetId": "covid-19-lab-result",
+  "valueSetDate": "2021-04-27",
+  "valueSetValues": {
+    "260415000": {
+      "display": "Not detected",
+      "lang": "en",
+      "active": true,
+      "version": "http://snomed.info/sct/900000000000207008/version/20210131",
+      "system": "http://snomed.info/sct"
+    },
+    "260373001": {
+      "display": "Detected",
+      "lang": "en",
+      "active": true,
+      "version": "http://snomed.info/sct/900000000000207008/version/20210131",
+      "system": "http://snomed.info/sct"
+    }
+  }
+};
+
+var testManufacturers = {
+  "valueSetId": "covid-19-lab-test-manufacturer-and-name",
+  "valueSetDate": "2021-04-27",
+  "valueSetValues": {
+    "1232": {
+      "display": "Abbott Rapid Diagnostics, Panbio COVID-19 Ag Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1304": {
+      "display": "AMEDA Labordiagnostik GmbH, AMP Rapid Test SARS-CoV-2 Ag",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1065": {
+      "display": "Becton Dickinson, Veritor System Rapid Detection of SARS-CoV-2",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1331": {
+      "display": "Beijing Lepu Medical Technology Co., Ltd, SARS-CoV-2 Antigen Rapid Test Kit",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1484": {
+      "display": "Beijing Wantai Biological Pharmacy Enterprise Co., Ltd, Wantai SARS-CoV-2 Ag Rapid Test (FIA)",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1242": {
+      "display": "Bionote, Inc, NowCheck COVID-19 Ag Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1223": {
+      "display": "BIOSYNEX SWISS SA, BIOSYNEX COVID-19 Ag BSS",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1173": {
+      "display": "CerTest Biotec, S.L., CerTest SARS-CoV-2 Card test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1244": {
+      "display": "GenBody, Inc, Genbody COVID-19 Ag Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1360": {
+      "display": "Guangdong Wesail Biotech Co., Ltd, COVID-19 Ag Test Kit",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1363": {
+      "display": "Hangzhou Clongene Biotech Co., Ltd, Covid-19 Antigen Rapid Test Kit",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1767": {
+      "display": "Healgen Scientific Limited Liability Company, Coronavirus Ag Rapid Test Cassette",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1333": {
+      "display": "Joinstar Biomedical Technology Co., Ltd, COVID-19 Rapid Antigen Test (Colloidal Gold)",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1268": {
+      "display": "LumiraDX UK Ltd, LumiraDx SARS-CoV-2 Ag Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1180": {
+      "display": "MEDsan GmbH, MEDsan SARS-CoV-2 Antigen Rapid Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1481": {
+      "display": "MP Biomedicals Germany GmbH, Rapid SARS-CoV-2 Antigen Test Card",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1162": {
+      "display": "Nal von minden GmbH, NADAL COVID-19 Ag Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1271": {
+      "display": "Precision Biosensor, Inc, Exdia COVID-19 Ag",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1341": {
+      "display": "Qingdao Hightop Biotech Co., Ltd, SARS-CoV-2 Antigen Rapid Test (Immunochromatography)",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1097": {
+      "display": "Quidel Corporation, Sofia SARS Antigen FIA",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1489": {
+      "display": "Safecare Biotech (Hangzhou) Co. Ltd, COVID-19 Antigen Rapid Test Kit (Swab)",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "344": {
+      "display": "SD BIOSENSOR Inc, STANDARD F COVID-19 Ag FIA",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "345": {
+      "display": "SD BIOSENSOR Inc, STANDARD Q COVID-19 Ag Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1218": {
+      "display": "Siemens Healthineers, CLINITEST Rapid Covid-19 Antigen Test",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1278": {
+      "display": "Xiamen Boson Biotech Co. Ltd, Rapid SARS-CoV-2 Antigen Test Card",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    },
+    "1343": {
+      "display": "Zhejiang Orient Gene Biotech, Coronavirus Ag Rapid Test Cassette (Swab)",
+      "lang": "en",
+      "active": true,
+      "system": "https://covid-19-diagnostics.jrc.ec.europa.eu/devices",
+      "version": "2021-04-22 02:23:55 CET"
+    }
+  }
+};
+
+function onScanSuccess(decodedText, decodedResult) {
+  clearVals();
+  setVal('rawCode', decodedText);
+  if(!decodedText.match(/^HC[12]:/)) return;
+
+  var data = decode(decodedText.substr(4));
+  var inflated = new Zlib.Inflate(data);
+  var cborGlobal = cborDecode(inflated.decompress());
+  var cborHeader = cborDecode(cborGlobal[0]);
+  var cborPayload = cborDecode(cborGlobal[2]);
+  var cert = cborPayload[-260][1];
+
+  setVal('encAlg', cborHeader[1]);
+  setVal('hash', cborHeader[4]);
+
+  setVal('issuer', cborPayload[1]);
+  setVal('startDate', new Date(cborPayload[6]*1000).toDateString());
+  setVal('endDate', new Date(cborPayload[4]*1000).toDateString());
+  setVal('ver', cert.ver);
+
+  setVal('surname', cert.nam.fn);
+  setVal('stSurname', cert.nam.fnt);
+  setVal('forename', cert.nam.gn);
+  setVal('stForename', cert.nam.gnt);
+  setVal('dob', cert.dob);
+ 
+  if(cert.v) {
+    var vac = cert.v[0];
+    setVal('vId', vac.ci);
+    setVal('vCtry', vac.co);
+    setVal('vDate', vac.dt);
+    setVal('vIss', vac.is);
+    setVal('vDose', vac.dn + ' of ' + vac.sd);
+    setVal('vDisease', vac.tg + ' ==> ' + diseases.valueSetValues[vac.tg].display);
+    setVal('vType', vac.vp + ' ==> ' + types.valueSetValues[vac.vp].display);
+    setVal('vProd', vac.mp + ' ==> ' + products.valueSetValues[vac.mp].display);
+    setVal('vMan', vac.ma + ' ==> ' + manufacturers.valueSetValues[vac.ma].display);
+  } 
+
+  if(cert.t) {
+    var test = cert.t[0];
+    setVal('tId', test.ci);
+    setVal('tCtry', test.co);
+    setVal('tDate', test.sc);
+    setVal('tIss', test.is);
+    setVal('tDisease', test.tg + ' ==> ' + diseases.valueSetValues[test.tg].display);
+    setVal('tType', test.tt + ' ==> ' + tests.valueSetValues[test.tt].display);
+    setVal('tName', test.nm);
+    setVal('tDev', test.ma ? test.ma + ' ==> ' + testManufacturers.valueSetValues[test.ma].display : "" );
+    setVal('tCenter', test.tc + ' ==> http://finess.sante.gouv.fr/fininter/jsp/actionDetailEtablissement.do?noFiness=' + test.tc);
+    setVal('tRes', test.tr + ' ==> ' + results.valueSetValues[test.tr].display);
+    
+  }  
+  return;
+}
+
+function onScanFailure(error) {
+  // handle scan failure, usually better to ignore and keep scanning.
+  // for example:
+  console.warn(`Code scan error = ${error}`);
+}
+
+let html5QrcodeScanner = new Html5QrcodeScanner(
+	"reader", { fps: 10, qrbox: 250 }, /* verbose= */ false);
+html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+</script>
+</body>
+</html>
